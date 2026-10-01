@@ -2,212 +2,118 @@ import React, { useState, useEffect } from 'react';
 import Header from './components/Header.jsx';
 import TableGrid from './components/TableGrid.jsx';
 import TableDetails from './components/TableDetails.jsx';
-import ProductCatalog from './components/ProductCatalog.jsx';
-import OrderHistory from './components/OrderHistory.jsx';
 import Login from './components/Login.jsx';
-import MonthlyReport from './components/MonthlyReport.jsx';
 import DbConfigModal from './components/DbConfigModal.jsx';
 import QuickCashier from './components/QuickCashier.jsx';
+import SplashScreen from './components/SplashScreen.jsx';
+import EstoquePage from './components/fifo/EstoquePage.jsx';
+import PrecificacaoPage from './components/fifo/PrecificacaoPage.jsx';
+import FaturamentoPage from './components/fifo/FaturamentoPage.jsx';
+import CatalogoPage from './components/fifo/CatalogoPage.jsx';
+import HistoricoPage from './components/fifo/HistoricoPage.jsx';
+import RelatorioPage from './components/fifo/RelatorioPage.jsx';
 
-import { db, isConfigured } from './firebase.js';
 import { 
-  collection, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
-  getDocs, 
-  onSnapshot, 
-  writeBatch 
-} from 'firebase/firestore';
+  subscribeProdutos,
+  salvarProduto,
+  excluirProduto,
+  subscribeMesas,
+  salvarMesa,
+  subscribeHistorico,
+  salvarHistorico,
+  limparHistorico,
+  subscribeDespesas,
+  salvarDespesa,
+  excluirDespesa,
+  subscribeEstoqueEntradas,
+  registrarEntradaEstoque,
+  atualizarEstoqueEntradas,
+  subscribePrecificacao,
+  definirPrecoVenda,
+  subscribeVendas,
+  subscribeVendaItens,
+  registrarVendaCompleta,
+  isLocalMode
+} from './services/inventoryService.js';
 
-const initialProducts = [
-  { id: '1', code: '001', name: 'Cerveja 600ml', price: 12.00 },
-  { id: '2', code: '002', name: 'Refrigerante Lata', price: 6.00 },
-  { id: '3', code: '003', name: 'Porção de Fritas', price: 35.00 },
-  { id: '4', code: '004', name: 'Escondidinho', price: 45.00 },
-];
+import { processarVendaCompletaFIFO, gerarIdVenda } from './services/fifoService.js';
+import { isConfigured } from './firebase.js';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem('bar_auth') === 'true';
   });
 
-  const [products, setProducts] = useState(() => {
-    try {
-      const saved = localStorage.getItem('bar_products');
-      return saved ? JSON.parse(saved) : initialProducts;
-    } catch (e) { return initialProducts; }
-  });
+  const [products, setProducts] = useState([]);
+  const [tables, setTables] = useState({});
+  const [history, setHistory] = useState([]);
+  const [expenses, setExpenses] = useState([]);
 
-  const [tables, setTables] = useState(() => {
-    try {
-      const saved = localStorage.getItem('bar_tables');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) { return {}; }
-  });
+  // FIFO State
+  const [estoqueEntradas, setEstoqueEntradas] = useState([]);
+  const [precificacao, setPrecificacao] = useState([]);
+  const [vendas, setVendas] = useState([]);
+  const [vendaItens, setVendaItens] = useState([]);
 
-  const [history, setHistory] = useState(() => {
-    try {
-      const saved = localStorage.getItem('bar_history');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) { return []; }
-  });
-
-  const [expenses, setExpenses] = useState(() => {
-    try {
-      const saved = localStorage.getItem('bar_expenses');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) { return []; }
-  });
-
-  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isReportOpen, setIsReportOpen] = useState(false);
+  // Modais e Telas
   const [selectedTableId, setSelectedTableId] = useState(null);
   const [isDbConfigOpen, setIsDbConfigOpen] = useState(false);
   const [isQuickCashierOpen, setIsQuickCashierOpen] = useState(false);
+  const [activeView, setActiveView] = useState('mesas'); // mesas | catalogo | estoque | precificacao | faturamento | historico | relatorio
+  const [showIntro, setShowIntro] = useState(true);
 
-  // 1. Sincronização e Migração Automática com Firebase
+  // Estados de comunicação cruzada entre telas
+  const [preselectedStockCode, setPreselectedStockCode] = useState('');
+  const [preselectedPrecoCode, setPreselectedPrecoCode] = useState('');
+
+  // 1. Subscrições Unificadas e Resilientes (Atualização em tempo real sem conflitos)
   useEffect(() => {
-    if (!isConfigured) return;
+    const unsubProds = subscribeProdutos(setProducts);
+    const unsubTabs = subscribeMesas(setTables);
+    const unsubHist = subscribeHistorico(setHistory);
+    const unsubExp = subscribeDespesas(setExpenses);
 
-    const syncAndMigrate = async () => {
-      try {
-        console.log("🔄 Iniciando sincronização e verificação de migração do Firebase...");
-        
-        // A. Migrar Produtos se vazio na nuvem
-        const prodSnap = await getDocs(collection(db, 'products'));
-        if (prodSnap.empty) {
-          console.log("📤 Migrando produtos do LocalStorage para o Firestore...");
-          const batch = writeBatch(db);
-          products.forEach((p) => {
-            batch.set(doc(db, 'products', String(p.id)), {
-              code: p.code,
-              name: p.name,
-              price: Number(p.price),
-              image: p.image || ''
-            });
+    const unsubEst = subscribeEstoqueEntradas((lista) => {
+      // Se estiver vazio e houver produtos, semeia lotes iniciais para o sistema começar 100% utilizável
+      if (lista.length === 0 && products.length > 0) {
+        const hasSeeded = sessionStorage.getItem('ocutus_estoque_seeded');
+        if (!hasSeeded) {
+          sessionStorage.setItem('ocutus_estoque_seeded', '1');
+          console.log('📦 Semeando estoque inicial para funcionamento dos produtos padrão...');
+          products.forEach(p => {
+            const venda = Number(p.price) || 12;
+            const custo = Number((venda * 0.55).toFixed(2));
+            registrarEntradaEstoque({
+              codigo_produto: String(p.code),
+              nome_produto: p.name,
+              quantidade_comprada: 50,
+              preco_custo_unitario: custo
+            }).catch(() => {});
           });
-          await batch.commit();
         }
-
-        // B. Migrar Mesas se vazio na nuvem
-        const tabSnap = await getDocs(collection(db, 'tables'));
-        if (tabSnap.empty && Object.keys(tables).length > 0) {
-          console.log("📤 Migrando mesas ativas do LocalStorage para o Firestore...");
-          const batch = writeBatch(db);
-          Object.entries(tables).forEach(([tableId, tableData]) => {
-            if (tableData && tableData.items && tableData.items.length > 0) {
-              batch.set(doc(db, 'tables', String(tableId)), {
-                items: tableData.items,
-                updatedAt: new Date().toISOString()
-              });
-            }
-          });
-          await batch.commit();
-        }
-
-        // C. Migrar Histórico se vazio na nuvem
-        const histSnap = await getDocs(collection(db, 'history'));
-        if (histSnap.empty && history.length > 0) {
-          console.log("📤 Migrando histórico de vendas para o Firestore...");
-          const batch = writeBatch(db);
-          history.forEach((h) => {
-            batch.set(doc(db, 'history', String(h.id)), {
-              tableId: String(h.tableId),
-              items: h.items,
-              total: Number(h.total),
-              timestamp: h.timestamp
-            });
-          });
-          await batch.commit();
-        }
-
-        // D. Migrar Despesas se vazio na nuvem
-        const expSnap = await getDocs(collection(db, 'expenses'));
-        if (expSnap.empty && expenses.length > 0) {
-          console.log("📤 Migrando despesas para o Firestore...");
-          const batch = writeBatch(db);
-          expenses.forEach((e) => {
-            batch.set(doc(db, 'expenses', String(e.id)), {
-              description: e.description,
-              amount: Number(e.amount),
-              date: e.date
-            });
-          });
-          await batch.commit();
-        }
-      } catch (err) {
-        console.error("⚠️ Erro na migração automática:", err);
       }
-    };
-
-    syncAndMigrate();
-
-    // Ouvintes em tempo real para sincronização multi-usuário
-    const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (list.length > 0) {
-        setProducts(list);
-      }
+      setEstoqueEntradas(lista);
     });
 
-    const unsubTables = onSnapshot(collection(db, 'tables'), (snapshot) => {
-      const data = {};
-      snapshot.docs.forEach(doc => {
-        data[doc.id] = doc.data();
-      });
-      setTables(data);
-    });
-
-    const unsubHistory = onSnapshot(collection(db, 'history'), (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      list.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      setHistory(list);
-    });
-
-    const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      list.sort((a, b) => new Date(b.date) - new Date(a.date));
-      setExpenses(list);
-    });
+    const unsubPrec = subscribePrecificacao(setPrecificacao);
+    const unsubVend = subscribeVendas(setVendas);
+    const unsubItens = subscribeVendaItens(setVendaItens);
 
     return () => {
-      unsubProducts();
-      unsubTables();
-      unsubHistory();
-      unsubExpenses();
+      unsubProds();
+      unsubTabs();
+      unsubHist();
+      unsubExp();
+      unsubEst();
+      unsubPrec();
+      unsubVend();
+      unsubItens();
     };
-  }, [isConfigured]);
+  }, [products.length]);
 
-  // 2. Persistência de Fallback do LocalStorage (Apenas se o Firebase NÃO estiver configurado)
   useEffect(() => {
     localStorage.setItem('bar_auth', isAuthenticated);
   }, [isAuthenticated]);
-
-  useEffect(() => {
-    if (!isConfigured) {
-      localStorage.setItem('bar_products', JSON.stringify(products));
-    }
-  }, [products, isConfigured]);
-
-  useEffect(() => {
-    if (!isConfigured) {
-      localStorage.setItem('bar_tables', JSON.stringify(tables));
-    }
-  }, [tables, isConfigured]);
-
-  useEffect(() => {
-    if (!isConfigured) {
-      localStorage.setItem('bar_history', JSON.stringify(history));
-    }
-  }, [history, isConfigured]);
-
-  useEffect(() => {
-    if (!isConfigured) {
-      localStorage.setItem('bar_expenses', JSON.stringify(expenses));
-    }
-  }, [expenses, isConfigured]);
 
   const handleLogin = () => setIsAuthenticated(true);
   const handleLogout = () => {
@@ -216,274 +122,363 @@ function App() {
     }
   };
 
+  // Navegação cruzada inteligente
+  const handleNavigateToEstoque = (code) => {
+    setPreselectedStockCode(code);
+    setActiveView('estoque');
+  };
+
+  const handleNavigateToPrecificacao = (code) => {
+    setPreselectedPrecoCode(code);
+    setActiveView('precificacao');
+  };
+
+  // ==========================================
+  // HANDLERS DE CATÁLOGO / PRODUTOS
+  // ==========================================
   const handleAddProduct = async (product) => {
-    if (isConfigured) {
-      try {
-        await setDoc(doc(db, 'products', String(product.id)), {
-          code: product.code,
-          name: product.name,
-          price: Number(product.price),
-          image: product.image || ''
-        });
-      } catch (e) { console.error("Erro ao adicionar produto:", e); }
-    } else {
-      setProducts(prev => [...prev, product]);
-    }
+    return await salvarProduto(product);
   };
 
   const handleUpdateProduct = async (updatedProduct) => {
-    if (isConfigured) {
-      try {
-        await setDoc(doc(db, 'products', String(updatedProduct.id)), {
-          code: updatedProduct.code,
-          name: updatedProduct.name,
-          price: Number(updatedProduct.price),
-          image: updatedProduct.image || ''
-        });
-      } catch (e) { console.error("Erro ao atualizar produto:", e); }
-    } else {
-      setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-    }
+    return await salvarProduto(updatedProduct);
   };
 
-  const handleDeleteProduct = async (productId) => {
-    if (isConfigured) {
-      try {
-        await deleteDoc(doc(db, 'products', String(productId)));
-      } catch (e) { console.error("Erro ao deletar produto:", e); }
-    } else {
-      setProducts(prev => prev.filter(p => p.id !== productId));
-    }
+  const handleDeleteProduct = async (productId, code) => {
+    return await excluirProduto(productId, code);
   };
 
+  // ==========================================
+  // HANDLERS FIFO (ESTOQUE E PRECIFICAÇÃO)
+  // ==========================================
+  const handleRegistrarEntrada = async ({ codigo_produto, nome_produto, quantidade_comprada, preco_custo_unitario }) => {
+    return await registrarEntradaEstoque({ codigo_produto, nome_produto, quantidade_comprada, preco_custo_unitario });
+  };
+
+  const handleDefinirPreco = async ({ codigo_produto, nome_produto, preco_venda_atual }) => {
+    return await definirPrecoVenda({ codigo_produto, nome_produto, preco_venda_atual });
+  };
+
+  // ==========================================
+  // HANDLERS DE DESPESAS
+  // ==========================================
   const handleAddExpense = async (expense) => {
-    if (isConfigured) {
-      try {
-        await setDoc(doc(db, 'expenses', String(expense.id)), {
-          description: expense.description,
-          amount: Number(expense.amount),
-          date: expense.date
-        });
-      } catch (e) { console.error("Erro ao adicionar despesa:", e); }
-    } else {
-      setExpenses(prev => [...prev, expense]);
-    }
+    return await salvarDespesa(expense);
   };
 
   const handleDeleteExpense = async (id) => {
-    if (isConfigured) {
-      try {
-        await deleteDoc(doc(db, 'expenses', String(id)));
-      } catch (e) { console.error("Erro ao deletar despesa:", e); }
-    } else {
-      setExpenses(prev => prev.filter(e => e.id !== id));
-    }
+    return await excluirDespesa(id);
   };
 
+  // ==========================================
+  // HANDLERS DE MESAS (VENDAS EM MESA)
+  // ==========================================
   const handleAddItemToTable = async (tableId, item) => {
     const id = String(tableId);
     const table = tables[id] || { items: [] };
-    
-    const existingItemIndex = table.items.findIndex(i => i.id === item.id);
+
+    // Validação de estoque disponível via FIFO
+    const codigo = String(item.code || item.codigo_produto).trim();
+    const disponivel = estoqueEntradas
+      .filter(e => String(e.codigo_produto).trim() === codigo)
+      .reduce((s, e) => s + Number(e.quantidade_disponivel || 0), 0);
+
+    const jaNaMesa = (table.items || [])
+      .filter(i => String(i.code).trim() === codigo)
+      .reduce((s, i) => s + Number(i.quantity || 0), 0);
+
+    const solicitado = Number(item.quantity || 1);
+
+    if (disponivel > 0 && (jaNaMesa + solicitado) > disponivel) {
+      alert(`Estoque insuficiente para ${item.name || codigo} (FIFO).\nDisponível: ${disponivel} un. | Já na mesa: ${jaNaMesa} un. | Solicitado: ${solicitado} un.\nCadastre nova entrada em Estoque.`);
+      return;
+    }
+
+    if (disponivel === 0) {
+      const prec = precificacao.find(p => String(p.codigo_produto).trim() === codigo);
+      if (!prec || Number(prec.preco_venda_atual) === 0) {
+        if (!window.confirm(`Aviso: O produto "${item.name || codigo}" está sem estoque e sem preço na precificação.\nDeseja adicionar à mesa mesmo assim?`)) {
+          return;
+        }
+      }
+    }
+
+    const existingIndex = (table.items || []).findIndex(i => i.id === item.id || String(i.code).trim() === codigo);
     let newItems;
 
-    if (existingItemIndex > -1) {
+    if (existingIndex > -1) {
       newItems = [...table.items];
-      newItems[existingItemIndex] = {
-        ...newItems[existingItemIndex],
-        quantity: newItems[existingItemIndex].quantity + item.quantity
+      newItems[existingIndex] = {
+        ...newItems[existingIndex],
+        quantity: newItems[existingIndex].quantity + solicitado
       };
     } else {
-      newItems = [...table.items, item];
+      newItems = [...(table.items || []), { ...item, quantity: solicitado }];
     }
 
-    if (isConfigured) {
-      try {
-        await setDoc(doc(db, 'tables', id), {
-          items: newItems,
-          updatedAt: new Date().toISOString()
-        });
-      } catch (e) { console.error("Erro ao adicionar item à mesa:", e); }
-    } else {
-      setTables(prev => ({
-        ...prev,
-        [id]: {
-          ...table,
-          items: newItems
-        }
-      }));
-    }
+    await salvarMesa(id, { ...table, items: newItems });
   };
 
   const handleRemoveItemFromTable = async (tableId, itemIndex) => {
     const id = String(tableId);
     const table = tables[id];
     if (!table) return;
-    
-    const newItems = [...table.items];
+
+    const newItems = [...(table.items || [])];
     newItems.splice(itemIndex, 1);
 
-    if (isConfigured) {
-      try {
-        if (newItems.length === 0) {
-          await deleteDoc(doc(db, 'tables', id));
-        } else {
-          await setDoc(doc(db, 'tables', id), {
-            items: newItems,
-            updatedAt: new Date().toISOString()
-          });
-        }
-      } catch (e) { console.error("Erro ao remover item da mesa:", e); }
+    if (newItems.length === 0) {
+      await salvarMesa(id, null);
     } else {
-      setTables(prev => ({
-        ...prev,
-        [id]: {
-          ...table,
-          items: newItems
-        }
-      }));
+      await salvarMesa(id, { ...table, items: newItems });
     }
   };
 
   const handleCloseBill = async (tableId, total) => {
     const id = String(tableId);
     const tableData = tables[id];
-    
-    if (!tableData) {
-      alert("Erro: Mesa não encontrada.");
+
+    if (!tableData || !tableData.items || tableData.items.length === 0) {
+      alert("A mesa não possui itens.");
       return;
     }
 
-    const historyEntry = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-      tableId: id,
-      items: [...tableData.items],
-      total: Number(total),
-      timestamp: new Date().toISOString()
-    };
+    const idVenda = gerarIdVenda();
+    const dataVenda = new Date().toISOString();
 
-    if (isConfigured) {
-      try {
-        // Registrar no histórico
-        await setDoc(doc(db, 'history', historyEntry.id), {
-          tableId: historyEntry.tableId,
-          items: historyEntry.items,
-          total: historyEntry.total,
-          timestamp: historyEntry.timestamp
+    const itensFIFO = (tableData.items || []).map(it => ({
+      codigo_produto: String(it.code || it.codigo_produto).trim(),
+      quantidade: Number(it.quantity || 1),
+      nome_produto: it.name || it.nome_produto || '',
+    }));
+
+    const precoMap = new Map();
+    precificacao.forEach(p => {
+      precoMap.set(String(p.codigo_produto).trim(), { 
+        preco_venda_atual: Number(p.preco_venda_atual), 
+        nome_produto: p.nome_produto 
+      });
+    });
+    products.forEach(p => {
+      const cod = String(p.code).trim();
+      if (!precoMap.has(cod)) {
+        precoMap.set(cod, { 
+          preco_venda_atual: Number(p.price || 0), 
+          nome_produto: p.name 
         });
-        // Deletar da mesa ativa
-        await deleteDoc(doc(db, 'tables', id));
-      } catch (e) { console.error("Erro ao fechar conta:", e); }
-    } else {
-      setHistory(prev => [historyEntry, ...prev]);
-      setTables(prev => {
-        const newTables = { ...prev };
-        delete newTables[id];
-        return newTables;
+      }
+    });
+
+    let fifoResultado = null;
+    try {
+      fifoResultado = processarVendaCompletaFIFO({
+        id_venda: idVenda,
+        data_venda: dataVenda,
+        itens: itensFIFO,
+        precificacaoMap: precoMap,
+        todasEntradasAtivas: estoqueEntradas,
+      });
+    } catch (e) {
+      alert(`Falha no cálculo FIFO: ${e.message}\nVerifique estoque e precificação.`);
+      throw e;
+    }
+
+    if (fifoResultado) {
+      await atualizarEstoqueEntradas(fifoResultado.todasAtualizacoes);
+      await registrarVendaCompleta({
+        id_venda: idVenda,
+        data_venda: dataVenda,
+        origem: 'MESA',
+        tableId: id,
+        todosConsumos: fifoResultado.todosConsumos,
+        resumo: fifoResultado.resumo
       });
     }
+
+    const historyEntry = {
+      id: idVenda,
+      tableId: id,
+      items: [...tableData.items],
+      total: Number(fifoResultado?.resumo?.totalFaturamento ?? total),
+      timestamp: dataVenda,
+      fifo: fifoResultado?.resumo || null,
+    };
+
+    await salvarHistorico(historyEntry);
+    await salvarMesa(id, null);
+
     return historyEntry;
   };
 
   const clearHistory = async () => {
-    if (window.confirm('Limpar histórico?')) {
-      if (isConfigured) {
-        try {
-          const snapshot = await getDocs(collection(db, 'history'));
-          const batch = writeBatch(db);
-          snapshot.docs.forEach((doc) => {
-            batch.delete(doc.ref);
-          });
-          await batch.commit();
-        } catch (e) { console.error("Erro ao limpar histórico:", e); }
-      } else {
-        setHistory([]);
-      }
+    if (window.confirm('Tem certeza que deseja limpar todo o histórico de vendas?')) {
+      await limparHistorico();
     }
   };
 
+  // ==========================================
+  // HANDLERS DE CAIXA RÁPIDO
+  // ==========================================
   const handleCompleteQuickSale = async (tableId, total, items, paymentMethod) => {
+    const idVenda = gerarIdVenda();
+    const dataVenda = new Date().toISOString();
+
+    const itensFIFO = (items || []).map(it => ({
+      codigo_produto: String(it.code || it.codigo_produto).trim(),
+      quantidade: Number(it.quantity || 1),
+      nome_produto: it.name || it.nome_produto || '',
+    }));
+
+    const precoMap = new Map();
+    precificacao.forEach(p => {
+      precoMap.set(String(p.codigo_produto).trim(), { 
+        preco_venda_atual: Number(p.preco_venda_atual), 
+        nome_produto: p.nome_produto 
+      });
+    });
+    products.forEach(p => {
+      const cod = String(p.code).trim();
+      if (!precoMap.has(cod)) {
+        precoMap.set(cod, { 
+          preco_venda_atual: Number(p.price || 0), 
+          nome_produto: p.name 
+        });
+      }
+    });
+
+    let fifoResultado = null;
+    try {
+      fifoResultado = processarVendaCompletaFIFO({
+        id_venda: idVenda,
+        data_venda: dataVenda,
+        itens: itensFIFO,
+        precificacaoMap: precoMap,
+        todasEntradasAtivas: estoqueEntradas,
+      });
+    } catch (e) {
+      alert(`Falha FIFO no Caixa Rápido: ${e.message}`);
+      throw e;
+    }
+
+    if (fifoResultado) {
+      await atualizarEstoqueEntradas(fifoResultado.todasAtualizacoes);
+      await registrarVendaCompleta({
+        id_venda: idVenda,
+        data_venda: dataVenda,
+        origem: 'CAIXA_RAPIDO',
+        tableId,
+        paymentMethod,
+        todosConsumos: fifoResultado.todosConsumos,
+        resumo: fifoResultado.resumo
+      });
+    }
+
     const historyEntry = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      id: idVenda,
       tableId: String(tableId),
       items: [...items],
-      total: Number(total),
-      timestamp: new Date().toISOString(),
-      paymentMethod: String(paymentMethod)
+      total: Number(fifoResultado?.resumo?.totalFaturamento ?? total),
+      timestamp: dataVenda,
+      paymentMethod: String(paymentMethod),
+      fifo: fifoResultado?.resumo || null,
     };
 
-    if (isConfigured) {
-      try {
-        await setDoc(doc(db, 'history', historyEntry.id), {
-          tableId: historyEntry.tableId,
-          items: historyEntry.items,
-          total: historyEntry.total,
-          timestamp: historyEntry.timestamp,
-          paymentMethod: historyEntry.paymentMethod
-        });
-      } catch (e) {
-        console.error("Erro ao salvar venda direta no Firebase:", e);
-        throw e;
-      }
-    } else {
-      setHistory(prev => [historyEntry, ...prev]);
-    }
+    await salvarHistorico(historyEntry);
     return historyEntry;
   };
+
+  if (showIntro) {
+    return <SplashScreen onFinish={() => setShowIntro(false)} />;
+  }
 
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
   }
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', paddingBottom: '2rem' }}>
+    <div className="app-layout" style={{ display: 'flex', minHeight: '100vh', background: 'transparent' }}>
       <Header 
-        onOpenCatalog={() => setIsCatalogOpen(true)} 
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenReport={() => setIsReportOpen(true)}
+        activeView={activeView}
+        onNavigate={setActiveView}
         onLogout={handleLogout}
         isConfigured={isConfigured}
         onOpenDbConfig={() => setIsDbConfigOpen(true)}
         onOpenQuickCashier={() => setIsQuickCashierOpen(true)}
       />
       
-      <main>
-        <TableGrid tables={tables} onTableClick={(id) => setSelectedTableId(id)} />
+      <main style={{ flex: 1, padding: '1.5rem', maxWidth: '1100px', margin: '0 auto', width: '100%', overflowY: 'auto' }}>
+        {activeView === 'mesas' && (
+          <TableGrid 
+            tables={tables} 
+            onTableClick={(id) => setSelectedTableId(id)} 
+          />
+        )}
+
+        {activeView === 'catalogo' && (
+          <CatalogoPage 
+            products={products} 
+            estoqueEntradas={estoqueEntradas}
+            precificacao={precificacao}
+            onAddProduct={handleAddProduct} 
+            onUpdateProduct={handleUpdateProduct} 
+            onDeleteProduct={handleDeleteProduct}
+            onNavigateToEstoque={handleNavigateToEstoque}
+            onNavigateToPrecificacao={handleNavigateToPrecificacao}
+          />
+        )}
+
+        {activeView === 'estoque' && (
+          <EstoquePage 
+            estoqueEntradas={estoqueEntradas} 
+            precificacao={precificacao} 
+            products={products} 
+            onRegistrarEntrada={handleRegistrarEntrada}
+            preselectedCode={preselectedStockCode}
+            onClearPreselected={() => setPreselectedStockCode('')}
+          />
+        )}
+
+        {activeView === 'precificacao' && (
+          <PrecificacaoPage 
+            precificacao={precificacao} 
+            estoqueEntradas={estoqueEntradas} 
+            products={products} 
+            onDefinirPreco={handleDefinirPreco}
+            preselectedCode={preselectedPrecoCode}
+          />
+        )}
+
+        {activeView === 'faturamento' && (
+          <FaturamentoPage 
+            vendas={vendas} 
+            vendaItens={vendaItens} 
+          />
+        )}
+
+        {activeView === 'historico' && (
+          <HistoricoPage 
+            history={history} 
+            onClear={clearHistory} 
+          />
+        )}
+
+        {activeView === 'relatorio' && (
+          <RelatorioPage 
+            history={history} 
+            expenses={expenses} 
+            onAddExpense={handleAddExpense} 
+            onDeleteExpense={handleDeleteExpense} 
+          />
+        )}
       </main>
-
-      {isCatalogOpen && (
-        <ProductCatalog 
-          products={products}
-          onAddProduct={handleAddProduct}
-          onUpdateProduct={handleUpdateProduct}
-          onDeleteProduct={handleDeleteProduct}
-          onClose={() => setIsCatalogOpen(false)}
-        />
-      )}
-
-      {isHistoryOpen && (
-        <OrderHistory 
-          history={history}
-          onClear={clearHistory}
-          onClose={() => setIsHistoryOpen(false)}
-        />
-      )}
-
-      {isReportOpen && (
-        <MonthlyReport 
-          history={history}
-          expenses={expenses}
-          onAddExpense={handleAddExpense}
-          onDeleteExpense={handleDeleteExpense}
-          onClose={() => setIsReportOpen(false)}
-        />
-      )}
 
       {selectedTableId && (
         <TableDetails 
           tableId={selectedTableId}
           tableData={tables[String(selectedTableId)] || { items: [] }}
           products={products}
+          estoqueEntradas={estoqueEntradas}
+          precificacao={precificacao}
           onClose={() => setSelectedTableId(null)}
           onAddItem={handleAddItemToTable}
           onRemoveItem={handleRemoveItemFromTable}
@@ -498,6 +493,8 @@ function App() {
       {isQuickCashierOpen && (
         <QuickCashier 
           products={products}
+          estoqueEntradas={estoqueEntradas}
+          precificacao={precificacao}
           onClose={() => setIsQuickCashierOpen(false)}
           onCompleteSale={handleCompleteQuickSale}
         />

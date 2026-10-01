@@ -1,11 +1,23 @@
 import React, { useState } from 'react';
 import { X, Search, Plus, Minus, Trash2, Check, ShoppingBag, CreditCard, DollarSign, Image as ImageIcon } from 'lucide-react';
 
-export default function QuickCashier({ products, onClose, onCompleteSale }) {
+export default function QuickCashier({ products, estoqueEntradas = [], precificacao = [], onClose, onCompleteSale }) {
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Pix');
   const [showSuccess, setShowSuccess] = useState(false);
+
+  const getPrecoVenda = (code) => {
+    const prec = precificacao.find(p => String(p.codigo_produto)===String(code));
+    return prec ? Number(prec.preco_venda_atual) : null;
+  };
+  const getEstoque = (code) => {
+    return estoqueEntradas.filter(e => String(e.codigo_produto)===String(code)).reduce((s,e)=> s+Number(e.quantidade_disponivel||0), 0);
+  };
+  const getPrecoEfetivo = (product) => {
+    const pv = getPrecoVenda(product.code);
+    return pv != null ? pv : Number(product.price);
+  };
 
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -13,16 +25,30 @@ export default function QuickCashier({ products, onClose, onCompleteSale }) {
   );
 
   const handleAddToCart = (product) => {
+    const precoEfetivo = getPrecoEfetivo(product);
+    const estoque = getEstoque(product.code);
+    const existente = cart.find(i => i.id === product.id);
+    const qtdAtual = existente ? existente.quantity : 0;
+    if (estoque > 0 && (qtdAtual + 1) > estoque) {
+      alert(`Estoque insuficiente para ${product.name} (FIFO).\nDisponível: ${estoque} | No carrinho: ${qtdAtual}`);
+      return;
+    }
+    if (estoque === 0) {
+      const prec = precificacao.find(p=> String(p.codigo_produto)===String(product.code));
+      if (!prec) {
+        if (!window.confirm(`Aviso: ${product.name} sem estoque e sem preço em Precificação.\nAdicionar mesmo assim?`)) return;
+      }
+    }
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
         return prev.map(item => 
           item.id === product.id 
-            ? { ...item, quantity: item.quantity + 1 }
+            ? { ...item, quantity: item.quantity + 1, price: precoEfetivo }
             : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...product, quantity: 1, price: precoEfetivo }];
     });
   };
 
@@ -44,7 +70,10 @@ export default function QuickCashier({ products, onClose, onCompleteSale }) {
     setCart(prev => prev.filter(item => item.id !== productId));
   };
 
-  const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const cartTotal = cart.reduce((sum, item) => {
+    const eff = getPrecoVenda(item.code) ?? Number(item.price);
+    return sum + (eff * item.quantity);
+  }, 0);
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
@@ -177,10 +206,10 @@ export default function QuickCashier({ products, onClose, onCompleteSale }) {
                     </div>
                   )}
 
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>#{product.code}</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>#{product.code} {(() => { const est = getEstoque(product.code); return <span style={{ padding: '0.1rem 0.3rem', borderRadius: '999px', fontSize: '0.6rem', fontWeight: 700, background: est>0?'rgba(74,222,128,0.12)':'rgba(239,68,68,0.12)', color: est>0?'#4ade80':'#f87171', border: `1px solid ${est>0?'rgba(74,222,128,0.2)':'rgba(239,68,68,0.2)'}` }}>{est} un</span>; })()}</span>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-color)', lineHeight: '1.2' }}>{product.name}</span>
-                  <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#4ade80' }}>
-                    R$ {Number(product.price).toFixed(2)}
+                  <span style={{ fontSize: '0.95rem', fontWeight: 700, color: getPrecoVenda(product.code)!=null ? '#4ade80' : '#fbbf24' }}>
+                    R$ {Number(getPrecoEfetivo(product)).toFixed(2)} {getPrecoVenda(product.code)==null && <span style={{ fontSize: '0.6rem', color: '#fbbf24' }}>(sem preço)</span>}
                   </span>
                 </button>
               ))}

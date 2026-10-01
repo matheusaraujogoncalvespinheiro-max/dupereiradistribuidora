@@ -5,6 +5,8 @@ export default function TableDetails({
   tableId, 
   tableData, 
   products, 
+  estoqueEntradas = [],
+  precificacao = [],
   onClose, 
   onAddItem, 
   onRemoveItem, 
@@ -19,8 +21,19 @@ export default function TableDetails({
   const [selectedProductId, setSelectedProductId] = useState('');
   const [quantity, setQuantity] = useState('');
 
+  const getPrecoVenda = (code) => {
+    const prec = precificacao.find(p => String(p.codigo_produto) === String(code));
+    return prec ? Number(prec.preco_venda_atual) : null;
+  };
+  const getEstoqueDisponivel = (code) => {
+    return estoqueEntradas.filter(e => String(e.codigo_produto)===String(code)).reduce((s,e)=> s+Number(e.quantidade_disponivel||0), 0);
+  };
+
   const items = tableData?.items || [];
-  const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const total = items.reduce((sum, item) => {
+    const precoAtual = getPrecoVenda(item.code) ?? Number(item.price);
+    return sum + (precoAtual * item.quantity);
+  }, 0);
 
   const handleSearchCode = () => {
     if (!searchCode) return;
@@ -84,7 +97,7 @@ export default function TableDetails({
     const html = `
       <html>
         <head>
-          <title>Mesa ${data.tableId} - Bar do Getúlio</title>
+          <title>Mesa ${data.tableId} - Ocutus Sisteams</title>
           <style>
             body { 
               font-family: 'Courier New', Courier, monospace; 
@@ -105,7 +118,7 @@ export default function TableDetails({
           </style>
         </head>
         <body>
-          <h1>BAR DO GETÚLIO</h1>
+          <h1>OCUTUS SISTEAMS</h1>
           <p>Comprovante de Consumo</p>
           <div class="divider"></div>
           <p>Mesa: ${data.tableId} | Data: ${dateStr}</p>
@@ -283,6 +296,17 @@ export default function TableDetails({
                         )}
                         <span>{selectedProduct.name}</span>
                       </div>
+                      {(() => {
+                        const disp = getEstoqueDisponivel(selectedProduct.code);
+                        const preco = getPrecoVenda(selectedProduct.code);
+                        return (
+                          <div style={{ fontSize: '0.7rem', marginTop: '0.3rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <span style={{ padding: '0.15rem 0.4rem', borderRadius: '999px', background: disp>0 ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)', color: disp>0 ? '#4ade80' : '#f87171', border: `1px solid ${disp>0 ? 'rgba(74,222,128,0.2)' : 'rgba(239,68,68,0.2)'}`, fontWeight: 600 }}>Estoque: {disp}</span>
+                            {preco != null && <span style={{ padding: '0.15rem 0.4rem', borderRadius: '999px', background: 'rgba(10,132,255,0.12)', color: '#8ec8ff', border: '1px solid rgba(10,132,255,0.2)' }}>Venda: R$ {Number(preco).toFixed(2)}</span>}
+                            {preco == null && <span style={{ color: '#fbbf24', fontSize: '0.7rem' }}>⚠ Sem preço em Precificação</span>}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div style={{ width: '80px' }}>
                       <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px', display: 'block' }}>Qtd.</label>
@@ -349,7 +373,7 @@ export default function TableDetails({
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontFamily: 'monospace' }}>
                           [{item.code}]
                         </span>
-                        <span style={{ color: 'var(--accent-color, #ffd700)' }}>{item.quantity}x</span>
+                        <span style={{ color: 'var(--accent-color, #0A84FF)' }}>{item.quantity}x</span>
                         <span>{item.name}</span>
                       </div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>

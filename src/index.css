@@ -1,20 +1,22 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --bg-dark: #0f172a;
-  --bg-card: rgba(30, 41, 59, 0.7);
-  --bg-card-hover: rgba(51, 65, 85, 0.8);
+  /* Paleta Ocutus Sisteams - extraída da logo */
+  --bg-dark: #030711;
+  --bg-card: rgba(8, 24, 48, 0.75);
+  --bg-card-hover: rgba(15, 40, 80, 0.85);
   
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --success: #10b981;
+  --primary: #0A84FF;
+  --primary-hover: #0066CC;
+  --accent: #00BFFF;
+  --success: #0A84FF;
   --danger: #ef4444;
-  --warning: #f59e0b;
+  --warning: #38bdf8;
   
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
+  --text-main: #f0f7ff;
+  --text-muted: #8da2c0;
   
-  --border-color: rgba(255, 255, 255, 0.1);
+  --border-color: rgba(10, 132, 255, 0.15);
 }
 
 * {
@@ -29,8 +31,9 @@ body {
   color: var(--text-main);
   min-height: 100vh;
   background-image: 
-    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.15) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(10, 132, 255, 0.22) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(0, 191, 255, 0.12) 0px, transparent 40%),
+    radial-gradient(at 100% 100%, rgba(10, 132, 255, 0.15) 0px, transparent 50%);
   background-attachment: fixed;
   overflow-x: hidden;
 }
@@ -115,7 +118,7 @@ body {
 .input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.25);
 }
 
 .input::placeholder {
@@ -182,6 +185,38 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* Layout com sidebar lateral */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+.sidebar {
+  width: 270px;
+  min-width: 270px;
+}
+@media (max-width: 900px) {
+  .app-layout {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100% !important;
+    min-width: 100% !important;
+    min-height: auto !important;
+    position: relative !important;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(10,132,255,0.18);
+    padding: 1rem !important;
+  }
+  .sidebar nav {
+    width: 100%;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+  }
 }
 
 /* Animations */
