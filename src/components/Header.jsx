@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { History, LogOut, BarChart3, ShoppingBag, Package, Tag, TrendingUp, Layers, Settings, ShieldCheck, Cloud } from 'lucide-react';
+import { History, LogOut, BarChart3, ShoppingBag, Package, Tag, TrendingUp, Layers, Settings, ShieldCheck, Cloud, Users } from 'lucide-react';
 import ocutusLogo from '../assets/ocutus_logo.png';
 import { isLocalMode } from '../services/inventoryService.js';
 import { isCloudHealthy } from '../firebase.js';
@@ -10,7 +10,8 @@ export default function Header({
   onLogout, 
   isConfigured, 
   onOpenDbConfig, 
-  onOpenQuickCashier 
+  onOpenQuickCashier,
+  currentUser
 }) {
   const [cloudActive, setCloudActive] = useState(() => isCloudHealthy());
 
@@ -24,6 +25,11 @@ export default function Header({
     return () => window.removeEventListener('ocutus_cloud_status', handleStatus);
   }, []);
 
+  const temPerm = (key) => {
+    if (!currentUser) return true;
+    if (currentUser.permissoes?.gestaoUsuarios) return true;
+    return !!currentUser.permissoes?.[key];
+  };
   const navBtnStyle = {
     width: '100%',
     justifyContent: 'flex-start',
@@ -74,6 +80,11 @@ export default function Header({
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>OCUTUS</h1>
             <p style={{ fontSize: '0.75rem', color: '#8ec8ff', letterSpacing: '0.12em', fontWeight: 600, marginTop: '-2px' }}>SISTEAMS</p>
+            {currentUser && (
+              <div style={{ fontSize: '0.65rem', color: '#fff', background: 'rgba(10,132,255,0.15)', padding: '0.2rem 0.45rem', borderRadius: '999px', border: '1px solid rgba(10,132,255,0.25)', marginTop: '0.4rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <Users size={10} /> {currentUser.nome} • {currentUser.username}
+              </div>
+            )}
             
             {cloudActive ? (
               <span style={{ 
@@ -121,94 +132,122 @@ export default function Header({
         
         {/* Navegação lateral */}
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <button className="btn btn-ghost" onClick={() => onNavigate('mesas')} style={{ 
-            ...navBtnStyle, 
-            background: activeView === 'mesas' ? 'rgba(10,132,255,0.15)' : 'transparent',
-            border: activeView === 'mesas' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
-            color: activeView === 'mesas' ? '#fff' : 'var(--text-muted)',
-          }}>
-            <Layers size={20} />
-            <span>Mesas</span>
-          </button>
+          {temPerm('mesas') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('mesas')} style={{ 
+              ...navBtnStyle, 
+              background: activeView === 'mesas' ? 'rgba(10,132,255,0.15)' : 'transparent',
+              border: activeView === 'mesas' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
+              color: activeView === 'mesas' ? '#fff' : 'var(--text-muted)',
+            }}>
+              <Layers size={20} />
+              <span>Mesas</span>
+            </button>
+          )}
 
-          <button className="btn btn-ghost" onClick={onOpenQuickCashier} style={{ 
-            ...navBtnStyle, 
-            color: '#fff', 
-            background: 'linear-gradient(135deg, #0A84FF 0%, #0066CC 100%)', 
-            border: '1px solid rgba(255,255,255,0.1)', 
-            boxShadow: '0 2px 10px rgba(10,132,255,0.25)' 
-          }}>
-            <ShoppingBag size={20} />
-            <span>Caixa Rápido</span>
-          </button>
+          {temPerm('caixaRapido') && (
+            <button className="btn btn-ghost" onClick={onOpenQuickCashier} style={{ 
+              ...navBtnStyle, 
+              color: '#fff', 
+              background: 'linear-gradient(135deg, #0A84FF 0%, #0066CC 100%)', 
+              border: '1px solid rgba(255,255,255,0.1)', 
+              boxShadow: '0 2px 10px rgba(10,132,255,0.25)' 
+            }}>
+              <ShoppingBag size={20} />
+              <span>Caixa Rápido</span>
+            </button>
+          )}
           
           <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', letterSpacing: '0.12em', fontWeight: 600, padding: '0 0.5rem', marginTop: '0.75rem', marginBottom: '0.25rem' }}>
             FIFO / ESTOQUE
           </p>
 
-          <button className="btn btn-ghost" onClick={() => onNavigate('catalogo')} style={{ 
-            ...navBtnStyle, 
-            background: activeView === 'catalogo' ? 'rgba(10,132,255,0.15)' : 'transparent',
-            border: activeView === 'catalogo' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
-            color: activeView === 'catalogo' ? '#fff' : 'var(--text-muted)',
-          }}>
-            <Settings size={20} />
-            <span>Catálogo</span>
-          </button>
+          {temPerm('catalogo') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('catalogo')} style={{ 
+              ...navBtnStyle, 
+              background: activeView === 'catalogo' ? 'rgba(10,132,255,0.15)' : 'transparent',
+              border: activeView === 'catalogo' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
+              color: activeView === 'catalogo' ? '#fff' : 'var(--text-muted)',
+            }}>
+              <Settings size={20} />
+              <span>Catálogo</span>
+            </button>
+          )}
 
-          <button className="btn btn-ghost" onClick={() => onNavigate('estoque')} style={{ 
-            ...navBtnStyle, 
-            border: activeView === 'estoque' ? '1px solid rgba(10,132,255,0.35)' : '1px solid rgba(10,132,255,0.18)', 
-            color: activeView === 'estoque' ? '#fff' : '#8ec8ff',
-            background: activeView === 'estoque' ? 'rgba(10,132,255,0.15)' : 'transparent'
-          }}>
-            <Package size={20} />
-            <span>Entradas Estoque</span>
-          </button>
+          {temPerm('estoque') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('estoque')} style={{ 
+              ...navBtnStyle, 
+              border: activeView === 'estoque' ? '1px solid rgba(10,132,255,0.35)' : '1px solid rgba(10,132,255,0.18)', 
+              color: activeView === 'estoque' ? '#fff' : '#8ec8ff',
+              background: activeView === 'estoque' ? 'rgba(10,132,255,0.15)' : 'transparent'
+            }}>
+              <Package size={20} />
+              <span>Entradas Estoque</span>
+            </button>
+          )}
 
-          <button className="btn btn-ghost" onClick={() => onNavigate('precificacao')} style={{ 
-            ...navBtnStyle, 
-            border: activeView === 'precificacao' ? '1px solid rgba(10,132,255,0.35)' : '1px solid rgba(10,132,255,0.18)', 
-            color: activeView === 'precificacao' ? '#fff' : '#8ec8ff',
-            background: activeView === 'precificacao' ? 'rgba(10,132,255,0.15)' : 'transparent'
-          }}>
-            <Tag size={20} />
-            <span>Precificação</span>
-          </button>
+          {temPerm('precificacao') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('precificacao')} style={{ 
+              ...navBtnStyle, 
+              border: activeView === 'precificacao' ? '1px solid rgba(10,132,255,0.35)' : '1px solid rgba(10,132,255,0.18)', 
+              color: activeView === 'precificacao' ? '#fff' : '#8ec8ff',
+              background: activeView === 'precificacao' ? 'rgba(10,132,255,0.15)' : 'transparent'
+            }}>
+              <Tag size={20} />
+              <span>Precificação</span>
+            </button>
+          )}
 
-          <button className="btn btn-ghost" onClick={() => onNavigate('faturamento')} style={{ 
-            ...navBtnStyle, 
-            border: activeView === 'faturamento' ? '1px solid rgba(10,132,255,0.35)' : '1px solid rgba(10,132,255,0.18)', 
-            color: activeView === 'faturamento' ? '#fff' : '#8ec8ff',
-            background: activeView === 'faturamento' ? 'rgba(10,132,255,0.15)' : 'transparent'
-          }}>
-            <TrendingUp size={20} />
-            <span>Faturamento</span>
-          </button>
+          {temPerm('faturamento') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('faturamento')} style={{ 
+              ...navBtnStyle, 
+              border: activeView === 'faturamento' ? '1px solid rgba(10,132,255,0.35)' : '1px solid rgba(10,132,255,0.18)', 
+              color: activeView === 'faturamento' ? '#fff' : '#8ec8ff',
+              background: activeView === 'faturamento' ? 'rgba(10,132,255,0.15)' : 'transparent'
+            }}>
+              <TrendingUp size={20} />
+              <span>Faturamento</span>
+            </button>
+          )}
 
           <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', letterSpacing: '0.12em', fontWeight: 600, padding: '0 0.5rem', marginTop: '0.75rem', marginBottom: '0.25rem' }}>
             RELATÓRIOS
           </p>
 
-          <button className="btn btn-ghost" onClick={() => onNavigate('relatorio')} style={{ 
-            ...navBtnStyle,
-            background: activeView === 'relatorio' ? 'rgba(10,132,255,0.15)' : 'transparent',
-            border: activeView === 'relatorio' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
-            color: activeView === 'relatorio' ? '#fff' : 'var(--text-muted)',
-          }}>
-            <BarChart3 size={20} />
-            <span>Relatório Mensal</span>
-          </button>
+          {temPerm('relatorio') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('relatorio')} style={{ 
+              ...navBtnStyle,
+              background: activeView === 'relatorio' ? 'rgba(10,132,255,0.15)' : 'transparent',
+              border: activeView === 'relatorio' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
+              color: activeView === 'relatorio' ? '#fff' : 'var(--text-muted)',
+            }}>
+              <BarChart3 size={20} />
+              <span>Relatório Mensal</span>
+            </button>
+          )}
 
-          <button className="btn btn-ghost" onClick={() => onNavigate('historico')} style={{ 
-            ...navBtnStyle,
-            background: activeView === 'historico' ? 'rgba(10,132,255,0.15)' : 'transparent',
-            border: activeView === 'historico' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
-            color: activeView === 'historico' ? '#fff' : 'var(--text-muted)',
-          }}>
-            <History size={20} />
-            <span>Histórico de Vendas</span>
-          </button>
+          {temPerm('historico') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('historico')} style={{ 
+              ...navBtnStyle,
+              background: activeView === 'historico' ? 'rgba(10,132,255,0.15)' : 'transparent',
+              border: activeView === 'historico' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
+              color: activeView === 'historico' ? '#fff' : 'var(--text-muted)',
+            }}>
+              <History size={20} />
+              <span>Histórico de Vendas</span>
+            </button>
+          )}
+
+          {temPerm('gestaoUsuarios') && (
+            <button className="btn btn-ghost" onClick={() => onNavigate('usuarios')} style={{ 
+              ...navBtnStyle,
+              background: activeView === 'usuarios' ? 'rgba(10,132,255,0.15)' : 'transparent',
+              border: activeView === 'usuarios' ? '1px solid rgba(10,132,255,0.3)' : '1px solid transparent',
+              color: activeView === 'usuarios' ? '#fff' : '#8ec8ff',
+            }}>
+              <Users size={20} />
+              <span>Usuários</span>
+            </button>
+          )}
         </nav>
       </div>
 

@@ -2,18 +2,24 @@ import { useState } from 'react';
 import { Lock, User, LogIn } from 'lucide-react';
 import ocutusLogo from '../assets/ocutus_logo.png';
 
+import { autenticar } from '../services/userService.js';
+
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (username === '77079868300' && password === '2596') {
-      onLogin();
-    } else {
-      setError('Usuário ou senha incorretos.');
-    }
+    setError('');
+    setLoading(true);
+    try {
+      const user = await autenticar(username, password);
+      onLogin(user);
+    } catch (err) {
+      setError(err.message || 'Usuário ou senha incorretos.');
+    } finally { setLoading(false); }
   };
 
   return (
@@ -89,18 +95,19 @@ export default function Login({ onLogin }) {
 
           {error && <p style={{ color: 'var(--danger)', fontSize: '0.875rem' }}>{error}</p>}
 
-          <button type="submit" className="btn btn-primary" style={{ 
+          <button type="submit" disabled={loading} className="btn btn-primary" style={{ 
             padding: '1rem', 
             fontSize: '1rem', 
             marginTop: '1rem',
-            background: 'linear-gradient(135deg, #0A84FF 0%, #0066CC 100%)',
+            background: loading ? '#334155' : 'linear-gradient(135deg, #0A84FF 0%, #0066CC 100%)',
             border: '1px solid rgba(255,255,255,0.12)',
             boxShadow: '0 4px 16px rgba(10,132,255,0.35)',
             fontWeight: 600,
-            letterSpacing: '0.02em'
+            letterSpacing: '0.02em',
+            opacity: loading ? 0.7 : 1
           }}>
             <LogIn size={20} />
-            <span>Entrar no Sistema</span>
+            <span>{loading ? 'Entrando...' : 'Entrar no Sistema'}</span>
           </button>
         </form>
       </div>

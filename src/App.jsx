@@ -12,6 +12,7 @@ import FaturamentoPage from './components/fifo/FaturamentoPage.jsx';
 import CatalogoPage from './components/fifo/CatalogoPage.jsx';
 import HistoricoPage from './components/fifo/HistoricoPage.jsx';
 import RelatorioPage from './components/fifo/RelatorioPage.jsx';
+import UsuariosPage from './components/fifo/UsuariosPage.jsx';
 
 import { 
   subscribeProdutos,
@@ -38,10 +39,12 @@ import {
 
 import { processarVendaCompletaFIFO, gerarIdVenda } from './services/fifoService.js';
 import { isConfigured } from './firebase.js';
+import { subscribeUsuarios, criarUsuario, atualizarUsuario, excluirUsuario, getCurrentUser, setCurrentUser, clearCurrentUser, temPermissao } from './services/userService.js';
 
 function App() {
+  const [currentUser, setCurrentUserState] = useState(() => getCurrentUser());
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('bar_auth') === 'true';
+    return !!getCurrentUser() || localStorage.getItem('bar_auth') === 'true';
   });
 
   const [products, setProducts] = useState([]);
@@ -54,6 +57,7 @@ function App() {
   const [precificacao, setPrecificacao] = useState([]);
   const [vendas, setVendas] = useState([]);
   const [vendaItens, setVendaItens] = useState([]);
+  const [usuarios, setUsuarios] = useState([]);
 
   // Modais e Telas
   const [selectedTableId, setSelectedTableId] = useState(null);
@@ -68,30 +72,13 @@ function App() {
 
   // 1. Subscrições Unificadas e Resilientes (Atualização em tempo real sem conflitos)
   useEffect(() => {
+    const unsubUsers = subscribeUsuarios(setUsuarios);
     const unsubProds = subscribeProdutos(setProducts);
     const unsubTabs = subscribeMesas(setTables);
     const unsubHist = subscribeHistorico(setHistory);
     const unsubExp = subscribeDespesas(setExpenses);
 
     const unsubEst = subscribeEstoqueEntradas((lista) => {
-      // Se estiver vazio e houver produtos, semeia lotes iniciais para o sistema começar 100% utilizável
-      if (lista.length === 0 && products.length > 0) {
-        const hasSeeded = sessionStorage.getItem('ocutus_estoque_seeded');
-        if (!hasSeeded) {
-          sessionStorage.setItem('ocutus_estoque_seeded', '1');
-          console.log('📦 Semeando estoque inicial para funcionamento dos produtos padrão...');
-          products.forEach(p => {
-            const venda = Number(p.price) || 12;
-            const custo = Number((venda * 0.55).toFixed(2));
-            registrarEntradaEstoque({
-              codigo_produto: String(p.code),
-              nome_produto: p.name,
-              quantidade_comprada: 50,
-              preco_custo_unitario: custo
-            }).catch(() => {});
-          });
-        }
-      }
       setEstoqueEntradas(lista);
     });
 
@@ -100,6 +87,7 @@ function App() {
     const unsubItens = subscribeVendaItens(setVendaItens);
 
     return () => {
+      unsubUsers();
       unsubProds();
       unsubTabs();
       unsubHist();
@@ -115,10 +103,30 @@ function App() {
     localStorage.setItem('bar_auth', isAuthenticated);
   }, [isAuthenticated]);
 
-  const handleLogin = () => setIsAuthenticated(true);
+  const handleLogin = (user) => {
+    if (user) {
+      setCurrentUserState(user);
+      setCurrentUser(user);
+    }
+    setIsAuthenticated(true);
+    // Redireciona para visão permitida
+    const perms = user?.permissoes;
+    if (perms && !perms.mesas) {
+      const firstAllowed = ['estoque','precificacao','faturamento','catalogo','historico','relatorio','caixaRapido'].find(k => perms[k]);
+      if (firstAllowed) {
+        const map = { estoque:'estoque', precificacao:'precificacao', faturamento:'faturamento', catalogo:'catalogo', historico:'historico', relatorio:'relatorio', caixaRapido:'mesas' };
+        setActiveView(map[firstAllowed] || 'mesas');
+      }
+    } else {
+      setActiveView('mesas');
+    }
+  };
   const handleLogout = () => {
     if (window.confirm('Deseja sair do sistema?')) {
+      clearCurrentUser();
+      setCurrentUserState(null);
       setIsAuthenticated(false);
+      setActiveView('mesas');
     }
   };
 
@@ -158,6 +166,13 @@ function App() {
   const handleDefinirPreco = async ({ codigo_produto, nome_produto, preco_venda_atual }) => {
     return await definirPrecoVenda({ codigo_produto, nome_produto, preco_venda_atual });
   };
+
+  // ==========================================
+  // HANDLERS DE USUÁRIOS E PERMISSÕES
+  // ==========================================
+  const handleCriarUsuario = async (dados) => { return await criarUsuario(dados); };
+  const handleAtualizarUsuario = async (id, dados) => { return await atualizarUsuario(id, dados); };
+  const handleExcluirUsuario = async (id) => { return await excluirUsuario(id); };
 
   // ==========================================
   // HANDLERS DE DESPESAS
@@ -395,6 +410,21 @@ function App() {
     return <Login onLogin={handleLogin} />;
   }
 
+  // Verifica permissão para view atual; redireciona se sem acesso
+  useEffect(() => {
+    if (!currentUser) return;
+    const permKeyMap = { mesas:'mesas', catalogo:'catalogo', estoque:'estoque', precificacao:'precificacao', faturamento:'faturamento', historico:'historico', relatorio:'relatorio' };
+    const key = permKeyMap[activeView];
+    if (key && !temPermissao(currentUser, key)) {
+      // Se não tem permissão, volta para primeira permitida
+      const first = Object.keys(permKeyMap).find(k => temPermissao(currentUser, permKeyMap[k]));
+      if (first) setActiveView(first);
+      else if (!temPermissao(currentUser, 'caixaRapido') && activeView==='mesas') {
+        // sem mesas, mas tem caixaRapido, mantém mesas pois caixa é modal
+      }
+    }
+  }, [activeView, currentUser]);
+
   return (
     <div className="app-layout" style={{ display: 'flex', minHeight: '100vh', background: 'transparent' }}>
       <Header 
@@ -403,7 +433,11 @@ function App() {
         onLogout={handleLogout}
         isConfigured={isConfigured}
         onOpenDbConfig={() => setIsDbConfigOpen(true)}
-        onOpenQuickCashier={() => setIsQuickCashierOpen(true)}
+        onOpenQuickCashier={() => {
+          if (!temPermissao(currentUser, 'caixaRapido')) { alert('Sem permissão para Caixa Rápido'); return; }
+          setIsQuickCashierOpen(true);
+        }}
+        currentUser={currentUser}
       />
       
       <main style={{ flex: 1, padding: '1.5rem', maxWidth: '1100px', margin: '0 auto', width: '100%', overflowY: 'auto' }}>
@@ -468,6 +502,16 @@ function App() {
             expenses={expenses} 
             onAddExpense={handleAddExpense} 
             onDeleteExpense={handleDeleteExpense} 
+          />
+        )}
+
+        {activeView === 'usuarios' && (
+          <UsuariosPage 
+            usuarios={usuarios}
+            currentUser={currentUser}
+            onCriar={handleCriarUsuario}
+            onAtualizar={handleAtualizarUsuario}
+            onExcluir={handleExcluirUsuario}
           />
         )}
       </main>
