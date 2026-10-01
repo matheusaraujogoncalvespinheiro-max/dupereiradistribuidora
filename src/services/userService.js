@@ -42,14 +42,45 @@ function isPermissionError(err) {
   return msg.includes('permission') || err?.code === 'permission-denied';
 }
 
-// Garante usuário admin inicial (77079868300 / 2596)
+// Garante usuário admin inicial (admin / 10282226) - migra do antigo 77079868300 se existir
 function garantirAdminInicial() {
-  const lista = lsGetUsuarios();
+  let lista = lsGetUsuarios();
+  // Migração: se existe admin antigo 77079868300, converte para admin/10282226
+  const oldAdminIdx = lista.findIndex(u => String(u.username) === '77079868300');
+  if (oldAdminIdx >= 0) {
+    const oldId = lista[oldAdminIdx].id;
+    lista[oldAdminIdx].username = 'admin';
+    lista[oldAdminIdx].password = '10282226';
+    lista[oldAdminIdx].nome = lista[oldAdminIdx].nome || 'Administrador';
+    lista[oldAdminIdx].permissoes = { ...PERMISSOES_PADRAO, ...(lista[oldAdminIdx].permissoes || {}) };
+    lista[oldAdminIdx].role = 'admin';
+    const dupIdx = lista.findIndex((u, i) => i !== oldAdminIdx && String(u.username) === 'admin');
+    if (dupIdx >= 0) lista.splice(dupIdx, 1);
+    lsSetUsuarios(lista);
+    try {
+      const cur = getCurrentUser();
+      if (cur && String(cur.username) === '77079868300') {
+        cur.username = 'admin';
+        cur.password = '10282226';
+        setCurrentUser(cur);
+      }
+    } catch {}
+    // Tenta atualizar também no Firestore (se existir doc antigo, remove e cria novo)
+    if (db) {
+      try {
+        // Tenta deletar doc antigo se id diferente de username, mas ID é admin_001, então só atualiza
+        setDoc(doc(db, 'usuarios', String(oldId)), lista[oldAdminIdx], { merge: true }).catch(()=>{});
+        // Se havia duplicata admin antigo, garante que não fique doc com username antigo
+      } catch {}
+    }
+    return lista;
+  }
+
   if (lista.length === 0) {
     const admin = {
       id: 'admin_001',
-      username: '77079868300',
-      password: '2596',
+      username: 'admin',
+      password: '10282226',
       nome: 'Administrador',
       permissoes: { ...PERMISSOES_PADRAO },
       role: 'admin',
@@ -59,9 +90,12 @@ function garantirAdminInicial() {
     return [admin];
   }
   // Se admin existe mas sem todas permissões, corrige
-  const admin = lista.find(u => u.username === '77079868300');
+  const admin = lista.find(u => String(u.username) === 'admin');
   if (admin && !admin.permissoes?.gestaoUsuarios) {
     admin.permissoes = { ...PERMISSOES_PADRAO };
+    // Garante credenciais corretas
+    admin.username = 'admin';
+    admin.password = '10282226';
     lsSetUsuarios(lista);
   }
   return lista;
@@ -108,12 +142,23 @@ export function subscribeUsuarios(callback) {
   if (db) {
     try {
       const unsub = onSnapshot(collection(db, 'usuarios'), (snap) => {
-        const lista = snap.docs.map(d => d.data());
+        let lista = snap.docs.map(d => d.data());
+        // Migração Firestore: converte 77079868300 -> admin
+        const needsMigrate = lista.some(u => String(u.username) === '77079868300');
+        if (needsMigrate) {
+          lista = lista.map(u => String(u.username) === '77079868300' ? { ...u, username: 'admin', password: '10282226', nome: u.nome || 'Administrador', permissoes: { ...PERMISSOES_PADRAO, ...(u.permissoes||{}) } } : u);
+          // Remove duplicata admin se houver
+          const seen = new Set();
+          lista = lista.filter(u => { const k = String(u.username); if (seen.has(k)) return false; seen.add(k); return true; });
+          lsSetUsuarios(lista);
+          // Atualiza Firestore em background
+          lista.forEach(u => { try { setDoc(doc(db, 'usuarios', String(u.id)), u, { merge: true }).catch(()=>{}); } catch {} });
+          // Tenta deletar doc antigo se id diferente? ID permanece, só username muda
+        }
         if (lista.length === 0) {
           const ls = lsGetUsuarios();
           callback(ls);
         } else {
-          // Mantém LS sincronizado
           lsSetUsuarios(lista);
           callback(lista);
         }
@@ -216,7 +261,7 @@ export async function excluirUsuario(id) {
   if (lista.length <= 1) throw new Error('Não é possível excluir o último usuário');
   const alvo = lista.find(u => String(u.id) === String(id));
   if (!alvo) throw new Error('Usuário não encontrado');
-  if (alvo.username === '77079868300') throw new Error('Não é possível excluir o administrador principal');
+  if (alvo.username === 'admin') throw new Error('Não é possível excluir o administrador principal');
 
   const filtrada = lista.filter(u => String(u.id) !== String(id));
   lsSetUsuarios(filtrada);
@@ -232,17 +277,23 @@ export async function excluirUsuario(id) {
 export async function autenticar(username, password) {
   const userTrim = String(username).trim();
   const passTrim = String(password).trim();
-  // Garante admin
   garantirAdminInicial();
-  // Tenta buscar do LS (que é espelho do Firestore)
   const lista = lsGetUsuarios();
-  // Se Firestore tem dados, lista já está sincronizada via subscribe, mas para login imediato tenta também Firestore direto
   let usuarios = lista;
   if (db) {
     try {
       const snap = await getDocs(collection(db, 'usuarios'));
       if (!snap.empty) {
-        const fsLista = snap.docs.map(d => d.data());
+        let fsLista = snap.docs.map(d => d.data());
+        // Migração Firestore para novo admin
+        const needsMigrate = fsLista.some(u => String(u.username) === '77079868300');
+        if (needsMigrate) {
+          fsLista = fsLista.map(u => String(u.username) === '77079868300' ? { ...u, username: 'admin', password: '10282226', nome: u.nome || 'Administrador', permissoes: { ...PERMISSOES_PADRAO, ...(u.permissoes||{}) } } : u);
+          const seen = new Set();
+          fsLista = fsLista.filter(u => { const k = String(u.username); if (seen.has(k)) return false; seen.add(k); return true; });
+          lsSetUsuarios(fsLista);
+          fsLista.forEach(u => { try { setDoc(doc(db, 'usuarios', String(u.id)), u, { merge: true }).catch(()=>{}); } catch {} });
+        }
         if (fsLista.length > 0) {
           usuarios = fsLista;
           lsSetUsuarios(fsLista);
@@ -250,7 +301,6 @@ export async function autenticar(username, password) {
       }
     } catch (err) {
       if (!isPermissionError(err)) console.error('autenticar firestore', err);
-      // usa LS
     }
   }
   const user = usuarios.find(u => String(u.username) === userTrim && String(u.password) === passTrim);

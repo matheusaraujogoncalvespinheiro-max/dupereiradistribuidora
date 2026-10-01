@@ -99,6 +99,18 @@ function App() {
     };
   }, [products.length]);
 
+  // Limpeza estoque para início limpo (solicitado) - executa uma vez
+  useEffect(() => {
+    const flag = localStorage.getItem('ocutus_estoque_limpo_v2');
+    if (!flag) {
+      localStorage.removeItem('ocutus_estoque_entradas');
+      localStorage.removeItem('ocutus_force_local');
+      sessionStorage.removeItem('ocutus_estoque_seeded');
+      localStorage.setItem('ocutus_estoque_limpo_v2', '1');
+      console.log('🧹 Estoque limpo para início zerado (FIFO)');
+    }
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('bar_auth', isAuthenticated);
   }, [isAuthenticated]);
