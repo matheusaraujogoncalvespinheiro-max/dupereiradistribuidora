@@ -115,6 +115,17 @@ function App() {
     localStorage.setItem('bar_auth', isAuthenticated);
   }, [isAuthenticated]);
 
+  // Verifica permissão para view atual; redireciona se sem acesso
+  useEffect(() => {
+    if (!currentUser) return;
+    const permKeyMap = { mesas:'mesas', catalogo:'catalogo', estoque:'estoque', precificacao:'precificacao', faturamento:'faturamento', historico:'historico', relatorio:'relatorio', usuarios:'usuarios' };
+    const key = permKeyMap[activeView];
+    if (key && !temPermissao(currentUser, key)) {
+      const first = Object.keys(permKeyMap).find(k => temPermissao(currentUser, permKeyMap[k]));
+      if (first) setActiveView(first);
+    }
+  }, [activeView, currentUser]);
+
   const handleLogin = (user) => {
     if (user) {
       setCurrentUserState(user);
@@ -421,21 +432,6 @@ function App() {
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
   }
-
-  // Verifica permissão para view atual; redireciona se sem acesso
-  useEffect(() => {
-    if (!currentUser) return;
-    const permKeyMap = { mesas:'mesas', catalogo:'catalogo', estoque:'estoque', precificacao:'precificacao', faturamento:'faturamento', historico:'historico', relatorio:'relatorio' };
-    const key = permKeyMap[activeView];
-    if (key && !temPermissao(currentUser, key)) {
-      // Se não tem permissão, volta para primeira permitida
-      const first = Object.keys(permKeyMap).find(k => temPermissao(currentUser, permKeyMap[k]));
-      if (first) setActiveView(first);
-      else if (!temPermissao(currentUser, 'caixaRapido') && activeView==='mesas') {
-        // sem mesas, mas tem caixaRapido, mantém mesas pois caixa é modal
-      }
-    }
-  }, [activeView, currentUser]);
 
   return (
     <div className="app-layout" style={{ display: 'flex', minHeight: '100vh', background: 'transparent' }}>
